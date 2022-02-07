@@ -1,0 +1,9 @@
+{
+    "train": "../train_dataset_diff",
+    "valid": "../val_dataset_diff",
+    "language": "en",
+    "train_feature": "../hand_features_diff.json",
+    "chosen_feature": "../handfeatures2_by_hand.json",
+    "keep_by_default": 0.9,
+    "interval_to_ask": [0.8, 0.9]
+}
