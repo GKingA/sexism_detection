@@ -17,12 +17,12 @@ from tuw_nlp.text.pipeline import CachedStanzaPipeline
 from tuw_nlp.graph import knowledge_graph
 from tuw_nlp.graph.knowledge_graph import KnowledgeGraph, KnowledgeNode
 
-# To unpickle previously pickeled files without error
-sys.modules["knowledge_graph"] = knowledge_graph
-
 from xpotato.dataset.dataset import Dataset
 from xpotato.models.trainer import GraphTrainer
 from xpotato.graph_extractor.extract import FeatureEvaluator
+
+# To unpickle previously pickeled files without error
+sys.modules["knowledge_graph"] = knowledge_graph
 
 
 def load_datasets(train_path, val_path, data_path, language, draw):
@@ -36,7 +36,8 @@ def load_datasets(train_path, val_path, data_path, language, draw):
         pipe = CachedStanzaPipeline(stanza.Pipeline(language, processors='tokenize,mwt,pos,lemma,depparse'), "cache")
         for i, (s_text, s_lang) in enumerate(zip(sexism.text, sexism.language)):
             if s_lang == language:
-                knowledge_graphs.append(KnowledgeGraph(text=s_text, pipeline=pipe, synset_method="graph_match", lang=language))
+                knowledge_graphs.append(KnowledgeGraph(text=s_text, pipeline=pipe, synset_method="graph_match",
+                                                       lang=language))
                 if draw:
                     dot = knowledge_graphs[-1].to_dot()
                     Source(dot).render(filename=f"sexism_graphs/sexism_{i}")
@@ -64,7 +65,7 @@ def load_features(train_feature, train, val):
     return features
 
 
-def find_good_features(features, keep_by_default, interval_to_ask):
+def find_good_features(evaluator, features, train, keep_by_default, interval_to_ask):
     if interval_to_ask is None:
         interval_to_ask = [0.8, 0.9]
     if keep_by_default is None:
@@ -74,7 +75,7 @@ def find_good_features(features, keep_by_default, interval_to_ask):
     stats = evaluator.evaluate_feature('sexist', feature_list, train)[0]
     for feature, prec, rec, f1 in zip(feature_list, stats["Precision"], stats["Recall"], stats["Fscore"]):
         print(f"Rule: {feature}\nPrecision: {prec}\nRecall: {rec}\nF1: {f1}")
-        if prec < interval_to_ask[1] and prec >= interval_to_ask[0]:
+        if interval_to_ask[1] > prec >= interval_to_ask[0]:
             user_inp = input("Input")
             if user_inp.lower().startswith("y"):
                 good_rules['sexist'].append(feature)
@@ -90,6 +91,30 @@ def load_config(args):
             if setting in config:
                 args.__dict__[setting] = config[setting]
     return args
+
+
+def main(args):
+    evaluator = FeatureEvaluator()
+    train, val = load_datasets(args.train, args.valid, args.sexism_file, args.language, args.draw)
+
+    if args.chosen_feature is not None and os.path.exists(args.chosen_feature):
+        hand_features = load_features(args.chosen_feature, train, val)
+    else:
+        features = load_features(args.train_feature, train, val)
+        hand_features = find_good_features(evaluator, features, train, args.keep_by_default, args.interval_to_ask)
+        if args.chosen_feature is None:
+            args.chosen_feature = "hand_features.json"
+        json.dump(hand_features, open(args.chosen_feature, "w"), indent=4)
+
+    train_stats = evaluator.evaluate_feature('sexist', hand_features['sexist'], train)[0]
+    print(classification_report(train.label_id,
+                                [(n > 0) * 1 for n in np.sum([p for p in train_stats["Predicted"]], axis=0)]))
+    for rule, stat in zip(hand_features['sexist'], train_stats["True_positive_indices"]):
+        print(f"\n{rule}:")
+        print(" ".join([str(s) for s in stat]))
+    val_stats = evaluator.evaluate_feature('sexist', hand_features['sexist'], val)[0]
+    print(classification_report(val.label_id,
+                                [(n > 0) * 1 for n in np.sum([p for p in val_stats["Predicted"]], axis=0)]))
 
 
 if __name__ == '__main__':
@@ -110,30 +135,12 @@ if __name__ == '__main__':
     argparser.add_argument("--train_feature", "-tf", help="Path to the feature json file generated")
     argparser.add_argument("--chosen_feature", "-cf", help="Path to the json file with the hand selected features")
     argparser.add_argument("--keep_by_default", "-k", 
-                           help="The treshold of precision to keep a certain rule", type=float)
+                           help="The threshold of precision to keep a certain rule", type=float)
     argparser.add_argument("--interval_to_ask", "-i", nargs=2,
                            help="The interval of precision where we ask the user whether to keep a rule", 
                            type=float)
     argparser.add_argument("--config", "-c", help="Configuration json file with arguments")
-    args = argparser.parse_args()
-    args = load_config(args)
+    arguments = argparser.parse_args()
+    arguments = load_config(arguments)
 
-    evaluator = FeatureEvaluator()
-    train, val = load_datasets(args.train, args.valid, args.sexism_file, args.language, args.draw)
-
-    if args.chosen_feature is not None and os.path.exists(args.chosen_feature):
-        hand_features = load_features(args.chosen_feature, train, val)
-    else:
-        features = load_features(args.train_feature, train, val)
-        hand_features = find_good_features(features, args.keep_by_default, args.interval_to_ask)
-        if args.chosen_feature is None:
-            args.chosen_feature = "hand_features.json"
-        json.dump(hand_features, open(args.chosen_feature, "w"), indent=4)
-
-    stats = evaluator.evaluate_feature('sexist', hand_features['sexist'], train)[0]
-    print(classification_report(train.label_id, [(n > 0) * 1 for n in np.sum([p for p in stats["Predicted"]], axis=0)]))
-    for rule, stat in zip(hand_features['sexist'], stats["False_positive_sens"]):
-        print(f"\n{rule}:")
-        print("\n\n".join([s[0] for s in stat]))
-    val_stats = evaluator.evaluate_feature('sexist', hand_features['sexist'], val)[0]
-    print(classification_report(val.label_id, [(n > 0)*1 for n in np.sum([p for p in val_stats["Predicted"]], axis=0)]))
+    main(arguments)
