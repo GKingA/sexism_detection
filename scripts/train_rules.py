@@ -13,6 +13,7 @@ from sklearn.metrics import classification_report
 from graphviz import Source
 
 # Knowledge Graph
+import tuw_nlp
 from tuw_nlp.text.pipeline import CachedStanzaPipeline
 from tuw_nlp.graph import knowledge_graph
 from tuw_nlp.graph.knowledge_graph import KnowledgeGraph, KnowledgeNode
@@ -109,9 +110,17 @@ def main(args):
     train_stats = evaluator.evaluate_feature('sexist', hand_features['sexist'], train)[0]
     print(classification_report(train.label_id,
                                 [(n > 0) * 1 for n in np.sum([p for p in train_stats["Predicted"]], axis=0)]))
+    who_found_it = {}
     for rule, stat in zip(hand_features['sexist'], train_stats["True_positive_indices"]):
         print(f"\n{rule}:")
         print(" ".join([str(s) for s in stat]))
+        for s in stat:
+            if s not in who_found_it:
+                who_found_it[s] = [rule]
+            else:
+                who_found_it[s].append(rule)
+    for key, items in who_found_it.items():
+        print(f"{key}: {items}")
     val_stats = evaluator.evaluate_feature('sexist', hand_features['sexist'], val)[0]
     print(classification_report(val.label_id,
                                 [(n > 0) * 1 for n in np.sum([p for p in val_stats["Predicted"]], axis=0)]))
